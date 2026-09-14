@@ -4,6 +4,14 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Mercado House Ledger</title>
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#2B2A28" />
+<link rel="icon" href="icon-192.png" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="Mercado Ledger" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@400;500;600;700&display=swap');
 
@@ -64,7 +72,9 @@
     plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
     bookOpen: '<path d="M2 4.5c2-1 4.5-1.5 6.5-1V19c-2-.5-4.5 0-6.5 1V4.5Z"/><path d="M22 4.5c-2-1-4.5-1.5-6.5-1V19c2-.5 4.5 0 6.5 1V4.5Z"/>',
     layoutDashboard: '<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>',
-    rotateCcw: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>'
+    rotateCcw: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
+    history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 3"/>',
+    wallet: '<path d="M3 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/><path d="M3 9h15a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H3"/><circle cx="16" cy="13" r="1"/>'
   };
 
   /* ---------------------------------------------------------------- */
@@ -136,8 +146,18 @@
   ];
 
   var ADMIN = {
-    id: "admin", label: "Admin", sub: "Overview & data management",
+    id: "admin", label: "Admin", sub: "Users & data management",
     icon: ICONS.layoutDashboard, accent: "#4A4A48", accentSoft: "#E8E6E1"
+  };
+
+  var HISTORY = {
+    id: "history", label: "History", sub: "All transactions",
+    icon: ICONS.history, accent: "#5C5546", accentSoft: "#ECE8DD"
+  };
+
+  var CASH_ADVANCE = {
+    id: "cashadvance", label: "Cash Advance", sub: "Edwin & Bombet balances",
+    icon: ICONS.wallet, accent: "#7A5C3A", accentSoft: "#F0E7D8"
   };
 
   function panelById(id) {
@@ -176,34 +196,57 @@
     data: emptyData(),
     activeId: "edwin",
     loading: true,
+    loadError: false,
     saveError: false,
     form: { date: todayISO() },
     authed: false,
+    showLoginModal: false,
     authForm: {},
     authError: "",
     loggedInUser: "",
+    loggedInRole: "admin",
     newUserForm: {},
-    newUserError: ""
+    newUserError: "",
+    editingUsername: null,
+    editPasswordForm: {},
+    editPasswordError: ""
   };
 
-  var storageAvailable = typeof window.storage !== "undefined" && window.storage;
+  /* ---------------------------------------------------------------- */
+  /* Supabase config                                                    */
+  /* ---------------------------------------------------------------- */
+  var SUPABASE_URL = "https://waqasikughpmplywnrah.supabase.co";
+  var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndhcWFzaWt1Z2hwbXBseXducmFoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzNTY0NzIsImV4cCI6MjEwNDkzMjQ3Mn0.dg6HqZXOkamps0VZi7hB8AUhQPEoO5LwlgJkSIue_c4";
+  var LEDGER_ROW_ID = "mercado-house";
+  var REST_URL = SUPABASE_URL + "/rest/v1/ledger_data";
+
+  function supabaseHeaders(extra) {
+    var headers = {
+      "apikey": SUPABASE_ANON_KEY,
+      "Authorization": "Bearer " + SUPABASE_ANON_KEY,
+      "Content-Type": "application/json"
+    };
+    if (extra) Object.assign(headers, extra);
+    return headers;
+  }
 
   function loadData() {
-    if (!storageAvailable) {
-      state.loading = false;
-      render();
-      return;
-    }
-    window.storage.get(STORAGE_KEY, false)
+    fetch(REST_URL + "?id=eq." + encodeURIComponent(LEDGER_ROW_ID) + "&select=payload", {
+      method: "GET",
+      headers: supabaseHeaders()
+    })
       .then(function (res) {
-        if (res && res.value) {
-          try {
-            var parsed = JSON.parse(res.value);
-            state.data = Object.assign(emptyData(), parsed);
-          } catch (e) { /* ignore parse errors, start fresh */ }
+        if (!res.ok) throw new Error("Failed to load");
+        return res.json();
+      })
+      .then(function (rows) {
+        if (rows && rows[0] && rows[0].payload) {
+          state.data = Object.assign(emptyData(), rows[0].payload);
         }
       })
-      .catch(function () { /* no existing data yet */ })
+      .catch(function () {
+        state.loadError = true;
+      })
       .then(function () {
         state.loading = false;
         render();
@@ -213,10 +256,13 @@
   function persist(next) {
     state.data = next;
     render();
-    if (!storageAvailable) return;
-    window.storage.set(STORAGE_KEY, JSON.stringify(next), false)
+    fetch(REST_URL + "?id=eq." + encodeURIComponent(LEDGER_ROW_ID), {
+      method: "PATCH",
+      headers: supabaseHeaders({ "Prefer": "return=minimal" }),
+      body: JSON.stringify({ payload: next, updated_at: new Date().toISOString() })
+    })
       .then(function (res) {
-        state.saveError = !res;
+        state.saveError = !res.ok;
         render();
       })
       .catch(function () {
@@ -239,22 +285,42 @@
   }
 
   function addEntry() {
+    if (!isAdmin()) return;
     var amt = state.form.amount;
     if (!amt || Number(amt) <= 0) return;
     var entry = Object.assign({ id: Date.now().toString(36) }, state.form);
+
+    var isPersonPanel = (state.activeId === "edwin" || state.activeId === "bombet");
+    if (isPersonPanel) {
+      if (entry.advance) {
+        delete entry.desc;
+      } else {
+        var currentBalance = computeCashAdvanceBalance(state.activeId);
+        if (currentBalance > 0) {
+          entry.appliedToAdvance = true;
+        }
+      }
+    }
+
     var next = Object.assign({}, state.data);
     next[state.activeId] = [entry].concat(state.data[state.activeId]);
     state.form = { date: todayISO() };
     persist(next);
   }
 
+  function isAdmin() {
+    return state.authed && state.loggedInRole === "admin";
+  }
+
   function removeEntry(catId, id) {
+    if (!isAdmin()) return;
     var next = Object.assign({}, state.data);
     next[catId] = state.data[catId].filter(function (e) { return e.id !== id; });
     persist(next);
   }
 
   function resetAll() {
+    if (!isAdmin()) return;
     var ok = window.confirm(
       "This will permanently delete every entry in every category. This cannot be undone. Continue?"
     );
@@ -274,9 +340,11 @@
       render();
       return;
     }
-    var next = Object.assign({}, state.data, { adminUsers: [{ username: username, password: password }] });
+    var next = Object.assign({}, state.data, { adminUsers: [{ username: username, password: password, role: "admin" }] });
     state.loggedInUser = username;
+    state.loggedInRole = "admin";
     state.authed = true;
+    state.showLoginModal = false;
     state.authForm = {};
     state.authError = "";
     persist(next);
@@ -292,7 +360,9 @@
     }
     if (match) {
       state.loggedInUser = match.username;
+      state.loggedInRole = match.role || "admin";
       state.authed = true;
+      state.showLoginModal = false;
       state.authForm = {};
       state.authError = "";
     } else {
@@ -302,9 +372,11 @@
   }
 
   function addUser() {
+    if (!isAdmin()) return;
     var users = state.data.adminUsers || [];
     var username = state.newUserForm.username;
     var password = state.newUserForm.password;
+    var role = state.newUserForm.role === "admin" ? "admin" : "viewer";
     if (!username || !password) {
       state.newUserError = "Enter a username and password.";
       render();
@@ -321,13 +393,14 @@
       render();
       return;
     }
-    var next = Object.assign({}, state.data, { adminUsers: users.concat([{ username: username, password: password }]) });
+    var next = Object.assign({}, state.data, { adminUsers: users.concat([{ username: username, password: password, role: role }]) });
     state.newUserForm = {};
     state.newUserError = "";
     persist(next);
   }
 
   function removeUser(username) {
+    if (!isAdmin()) return;
     var users = state.data.adminUsers || [];
     if (users.length <= 1) {
       window.alert("You can't remove the last remaining admin user.");
@@ -346,6 +419,48 @@
     }
   }
 
+  function startEditPassword(username) {
+    if (!isAdmin()) return;
+    state.editingUsername = username;
+    state.editPasswordForm = {};
+    state.editPasswordError = "";
+    render();
+  }
+
+  function cancelEditPassword() {
+    state.editingUsername = null;
+    state.editPasswordForm = {};
+    state.editPasswordError = "";
+    render();
+  }
+
+  function saveEditPassword() {
+    if (!isAdmin() || !state.editingUsername) return;
+    var password = state.editPasswordForm.password;
+    var confirm = state.editPasswordForm.confirm;
+    if (!password) {
+      state.editPasswordError = "Enter a new password.";
+      render();
+      return;
+    }
+    if (password !== confirm) {
+      state.editPasswordError = "Passwords don't match.";
+      render();
+      return;
+    }
+    var users = state.data.adminUsers || [];
+    var username = state.editingUsername;
+    var next = Object.assign({}, state.data, {
+      adminUsers: users.map(function (u) {
+        return u.username === username ? { username: u.username, password: password } : u;
+      })
+    });
+    state.editingUsername = null;
+    state.editPasswordForm = {};
+    state.editPasswordError = "";
+    persist(next);
+  }
+
   /* ---------------------------------------------------------------- */
   /* Derived values                                                     */
   /* ---------------------------------------------------------------- */
@@ -354,13 +469,29 @@
     PANELS.forEach(function (p) {
       t[p.id] = state.data[p.id].reduce(function (s, e) { return s + (Number(e.amount) || 0); }, 0);
     });
+    var cashImpact = {};
+    PANELS.forEach(function (p) {
+      cashImpact[p.id] = state.data[p.id].reduce(function (s, e) {
+        if (e.appliedToAdvance) return s;
+        return s + (Number(e.amount) || 0);
+      }, 0);
+    });
     var expenses = PANELS.filter(function (p) { return !p.isIncome; })
-      .reduce(function (s, p) { return s + t[p.id]; }, 0);
+      .reduce(function (s, p) { return s + cashImpact[p.id]; }, 0);
     var income = t.cash || 0;
     t.expenses = expenses;
     t.income = income;
     t.balance = income - expenses;
     return t;
+  }
+
+  function computeCashAdvanceBalance(personId) {
+    var entries = state.data[personId] || [];
+    var given = entries.filter(function (e) { return e.advance; })
+      .reduce(function (s, e) { return s + (Number(e.amount) || 0); }, 0);
+    var applied = entries.filter(function (e) { return e.appliedToAdvance; })
+      .reduce(function (s, e) { return s + (Number(e.amount) || 0); }, 0);
+    return given - applied;
   }
 
   function computeAllEntries() {
@@ -382,37 +513,113 @@
   var root = document.getElementById("root");
 
   function render() {
-    var totals = computeTotals();
-    var active = state.activeId === "admin" ? ADMIN : panelById(state.activeId);
-
     var html = "";
-    html += renderHeader();
-    html += renderBalanceStrip(totals);
-    html += '<div style="display:flex;align-items:stretch;">';
-    html += renderRail(active);
-    html += '<div style="flex:1;min-width:0;padding:16px 18px 40px;">';
-    html += renderPanelHeading(active);
 
-    if (state.activeId === "admin") {
-      html += renderAdmin(totals);
+    if (state.loading) {
+      html = renderLoadingScreen();
+    } else if (!state.authed) {
+      html = renderGate();
     } else {
-      html += renderEntryPanel(active, totals);
+      var totals = computeTotals();
+      if (state.activeId === "admin" && !isAdmin()) {
+        state.activeId = "edwin";
+      }
+      var active = state.activeId === "admin" ? ADMIN : (state.activeId === "history" ? HISTORY : (state.activeId === "cashadvance" ? CASH_ADVANCE : panelById(state.activeId)));
+
+      html += renderHeader();
+      html += renderBalanceStrip(totals);
+      html += '<div style="display:flex;align-items:stretch;">';
+      html += renderRail(active);
+      html += '<div style="flex:1;min-width:0;padding:16px 18px 40px;">';
+      html += renderPanelHeading(active);
+
+      if (state.activeId === "admin") {
+        html += renderAdmin(totals);
+      } else if (state.activeId === "history") {
+        html += renderHistory(totals);
+      } else if (state.activeId === "cashadvance") {
+        html += renderCashAdvance();
+      } else {
+        html += renderEntryPanel(active, totals);
+      }
+
+      html += '</div>'; // active panel
+      html += '</div>'; // body flex
     }
 
-    html += '</div>'; // active panel
-    html += '</div>'; // body flex
-
     root.innerHTML = html;
-    attachHandlers(active);
+    attachHandlers();
+  }
+
+  function renderLoadingScreen() {
+    return (
+      '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;">' +
+        '<div style="font-size:13px;color:#7A7264;">Loading\u2026</div>' +
+      '</div>'
+    );
+  }
+
+  function renderGate() {
+    var users = state.data.adminUsers || [];
+    var isSetup = users.length === 0;
+
+    var html = (
+      '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 18px;">' +
+        '<div style="width:100%;max-width:340px;">' +
+          '<div style="display:flex;align-items:center;gap:10px;justify-content:center;margin-bottom:22px;">' +
+            icon(ICONS.bookOpen, 24, "#2B2A28", 1.5) +
+            '<div style="font-size:18px;font-weight:600;color:#2B2A28;">Mercado House Ledger</div>' +
+          '</div>' +
+          '<div style="background:#FFFFFF;border:1px solid #E4DDCB;border-radius:12px;padding:18px;">'
+    );
+
+    if (isSetup) {
+      html += (
+        '<div style="font-size:14px;font-weight:700;margin-bottom:4px;">Set up access</div>' +
+        '<div style="font-size:12.5px;color:#7A7264;margin-bottom:14px;">Choose a username and password to protect this ledger.</div>' +
+        '<div style="margin-bottom:10px;"><label style="display:block;font-size:12px;color:#7A7264;margin-bottom:4px;">Username</label>' +
+          textInput({ key: "username", scope: "auth", type: "text", value: state.authForm.username }) +
+        '</div>' +
+        '<div style="margin-bottom:10px;"><label style="display:block;font-size:12px;color:#7A7264;margin-bottom:4px;">Password</label>' +
+          textInput({ key: "password", scope: "auth", type: "password", value: state.authForm.password }) +
+        '</div>' +
+        '<div style="margin-bottom:14px;"><label style="display:block;font-size:12px;color:#7A7264;margin-bottom:4px;">Confirm password</label>' +
+          textInput({ key: "confirm", scope: "auth", type: "password", value: state.authForm.confirm }) +
+        '</div>' +
+        (state.authError ? '<div style="font-size:12px;color:#8C4A3B;margin-bottom:10px;">' + escapeHtml(state.authError) + '</div>' : '') +
+        '<button data-action="save-credentials" style="width:100%;padding:10px;border-radius:8px;border:none;background:' + ADMIN.accent + ';color:#FFFFFF;font-size:14px;font-weight:600;cursor:pointer;">Save &amp; continue</button>'
+      );
+    } else {
+      html += (
+        '<div style="font-size:14px;font-weight:700;margin-bottom:4px;">Log in</div>' +
+        '<div style="font-size:12.5px;color:#7A7264;margin-bottom:14px;">Enter your username and password to continue.</div>' +
+        '<div style="margin-bottom:10px;"><label style="display:block;font-size:12px;color:#7A7264;margin-bottom:4px;">Username</label>' +
+          textInput({ key: "username", scope: "auth", type: "text", value: state.authForm.username }) +
+        '</div>' +
+        '<div style="margin-bottom:14px;"><label style="display:block;font-size:12px;color:#7A7264;margin-bottom:4px;">Password</label>' +
+          '<input type="password" data-field="password" data-scope="auth" data-enter="login" value="' + escapeHtml(state.authForm.password) + '" ' +
+          'style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid #D8D0BC;font-size:14px;background:#FBFAF6;color:#2B2A28;" />' +
+        '</div>' +
+        (state.authError ? '<div style="font-size:12px;color:#8C4A3B;margin-bottom:10px;">' + escapeHtml(state.authError) + '</div>' : '') +
+        '<button data-action="login" style="width:100%;padding:10px;border-radius:8px;border:none;background:' + ADMIN.accent + ';color:#FFFFFF;font-size:14px;font-weight:600;cursor:pointer;">Log in</button>'
+      );
+    }
+
+    html += '</div></div></div>';
+    return html;
   }
 
   function renderHeader() {
     return (
       '<header style="padding:20px 18px 14px;border-bottom:1px solid #DDD5C3;display:flex;align-items:center;gap:10px;">' +
         icon(ICONS.bookOpen, 22, "#2B2A28", 1.5) +
-        '<div>' +
+        '<div style="flex:1;min-width:0;">' +
           '<div style="font-size:18px;font-weight:600;letter-spacing:0.2px;">Mercado House Ledger</div>' +
           '<div style="font-size:12.5px;color:#7A7264;">Maintenance &amp; bills record</div>' +
+        '</div>' +
+        '<div style="display:flex;align-items:center;gap:8px;">' +
+          '<span style="font-size:12px;color:#7A7264;">' + escapeHtml(state.loggedInUser) + (state.loggedInRole === "viewer" ? " (viewer)" : "") + '</span>' +
+          '<button class="link-btn" data-action="logout" style="border:1px solid #D8D0BC;background:#FFFFFF;color:#2B2A28;font-size:12px;padding:6px 10px;border-radius:7px;cursor:pointer;">Log out</button>' +
         '</div>' +
       '</header>'
     );
@@ -451,15 +658,35 @@
       );
     });
     html += '<div style="height:1px;background:#DDD5C3;margin:4px 6px;"></div>';
-    var adminActive = state.activeId === "admin";
+    var historyActive = state.activeId === "history";
     html += (
-      '<button class="tab-btn" data-goto="admin" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:9px 4px;border-radius:10px;' +
-        'border:' + (adminActive ? "1.5px solid " + ADMIN.accent : "1.5px solid transparent") + ';' +
-        'background:' + (adminActive ? ADMIN.accentSoft : "transparent") + ';cursor:pointer;text-align:center;">' +
-        icon(ADMIN.icon, 18, ADMIN.accent, 1.75) +
-        '<span style="font-size:10.5px;line-height:1.15;font-weight:' + (adminActive ? 700 : 500) + ';color:#2B2A28;">' + ADMIN.label + '</span>' +
+      '<button class="tab-btn" data-goto="history" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:9px 4px;border-radius:10px;' +
+        'border:' + (historyActive ? "1.5px solid " + HISTORY.accent : "1.5px solid transparent") + ';' +
+        'background:' + (historyActive ? HISTORY.accentSoft : "transparent") + ';cursor:pointer;text-align:center;">' +
+        icon(HISTORY.icon, 18, HISTORY.accent, 1.75) +
+        '<span style="font-size:10.5px;line-height:1.15;font-weight:' + (historyActive ? 700 : 500) + ';color:#2B2A28;">' + HISTORY.label + '</span>' +
       '</button>'
     );
+    var cashAdvanceActive = state.activeId === "cashadvance";
+    html += (
+      '<button class="tab-btn" data-goto="cashadvance" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:9px 4px;border-radius:10px;' +
+        'border:' + (cashAdvanceActive ? "1.5px solid " + CASH_ADVANCE.accent : "1.5px solid transparent") + ';' +
+        'background:' + (cashAdvanceActive ? CASH_ADVANCE.accentSoft : "transparent") + ';cursor:pointer;text-align:center;">' +
+        icon(CASH_ADVANCE.icon, 18, CASH_ADVANCE.accent, 1.75) +
+        '<span style="font-size:10.5px;line-height:1.15;font-weight:' + (cashAdvanceActive ? 700 : 500) + ';color:#2B2A28;">Cash Adv.</span>' +
+      '</button>'
+    );
+    if (isAdmin()) {
+      var adminActive = state.activeId === "admin";
+      html += (
+        '<button class="tab-btn" data-goto="admin" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:9px 4px;border-radius:10px;' +
+          'border:' + (adminActive ? "1.5px solid " + ADMIN.accent : "1.5px solid transparent") + ';' +
+          'background:' + (adminActive ? ADMIN.accentSoft : "transparent") + ';cursor:pointer;text-align:center;">' +
+          icon(ADMIN.icon, 18, ADMIN.accent, 1.75) +
+          '<span style="font-size:10.5px;line-height:1.15;font-weight:' + (adminActive ? 700 : 500) + ';color:#2B2A28;">' + ADMIN.label + '</span>' +
+        '</button>'
+      );
+    }
     html += '</div>';
     return html;
   }
@@ -483,140 +710,185 @@
 
   function renderAdmin(totals) {
     var users = state.data.adminUsers || [];
-    var html = "";
+    var html = '<div style="margin-top:14px;">';
 
-    if (users.length === 0) {
+    // Manage admin users
+    html += '<div style="background:#FFFFFF;border:1px solid #E4DDCB;border-radius:10px;padding:12px 14px;margin-bottom:18px;">';
+    html += '<div style="font-size:13px;font-weight:700;margin-bottom:8px;">Admin users</div>';
+    html += '<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;">';
+    users.forEach(function (u) {
+      var isEditing = state.editingUsername === u.username;
+      html += '<div>';
       html += (
-        '<div style="margin-top:14px;background:#FFFFFF;border:1px solid #E4DDCB;border-radius:12px;padding:16px;">' +
-          '<div style="font-size:14px;font-weight:700;margin-bottom:4px;">Set up admin access</div>' +
-          '<div style="font-size:12.5px;color:#7A7264;margin-bottom:14px;">Choose a username and password to protect this panel.</div>' +
-          '<div style="margin-bottom:10px;"><label style="display:block;font-size:12px;color:#7A7264;margin-bottom:4px;">Username</label>' +
-            textInput({ key: "username", scope: "auth", type: "text", value: state.authForm.username }) +
-          '</div>' +
-          '<div style="margin-bottom:10px;"><label style="display:block;font-size:12px;color:#7A7264;margin-bottom:4px;">Password</label>' +
-            textInput({ key: "password", scope: "auth", type: "password", value: state.authForm.password }) +
-          '</div>' +
-          '<div style="margin-bottom:14px;"><label style="display:block;font-size:12px;color:#7A7264;margin-bottom:4px;">Confirm password</label>' +
-            textInput({ key: "confirm", scope: "auth", type: "password", value: state.authForm.confirm }) +
-          '</div>' +
-          (state.authError ? '<div style="font-size:12px;color:#8C4A3B;margin-bottom:10px;">' + escapeHtml(state.authError) + '</div>' : '') +
-          '<button data-action="save-credentials" style="width:100%;padding:10px;border-radius:8px;border:none;background:' + ADMIN.accent + ';color:#FFFFFF;font-size:14px;font-weight:600;cursor:pointer;">Save &amp; continue</button>' +
-        '</div>'
-      );
-    } else if (!state.authed) {
-      html += (
-        '<div style="margin-top:14px;background:#FFFFFF;border:1px solid #E4DDCB;border-radius:12px;padding:16px;">' +
-          '<div style="font-size:14px;font-weight:700;margin-bottom:4px;">Admin login</div>' +
-          '<div style="font-size:12.5px;color:#7A7264;margin-bottom:14px;">Enter the admin username and password to continue.</div>' +
-          '<div style="margin-bottom:10px;"><label style="display:block;font-size:12px;color:#7A7264;margin-bottom:4px;">Username</label>' +
-            textInput({ key: "username", scope: "auth", type: "text", value: state.authForm.username }) +
-          '</div>' +
-          '<div style="margin-bottom:14px;"><label style="display:block;font-size:12px;color:#7A7264;margin-bottom:4px;">Password</label>' +
-            '<input type="password" data-field="password" data-scope="auth" data-enter="login" value="' + escapeHtml(state.authForm.password) + '" ' +
-            'style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid #D8D0BC;font-size:14px;background:#FBFAF6;color:#2B2A28;" />' +
-          '</div>' +
-          (state.authError ? '<div style="font-size:12px;color:#8C4A3B;margin-bottom:10px;">' + escapeHtml(state.authError) + '</div>' : '') +
-          '<button data-action="login" style="width:100%;padding:10px;border-radius:8px;border:none;background:' + ADMIN.accent + ';color:#FFFFFF;font-size:14px;font-weight:600;cursor:pointer;">Log in</button>' +
-        '</div>'
-      );
-    } else {
-      html += '<div style="margin-top:14px;">';
-      html += (
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
-          '<div style="font-size:12px;color:#7A7264;">Logged in as <strong>' + escapeHtml(state.loggedInUser) + '</strong></div>' +
-          '<button class="link-btn" data-action="logout" style="border:none;background:transparent;color:#7A7264;font-size:12px;cursor:pointer;text-decoration:underline;">Log out</button>' +
-        '</div>'
-      );
-
-      // Manage admin users
-      html += '<div style="background:#FFFFFF;border:1px solid #E4DDCB;border-radius:10px;padding:12px 14px;margin-bottom:18px;">';
-      html += '<div style="font-size:13px;font-weight:700;margin-bottom:8px;">Admin users</div>';
-      html += '<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;">';
-      users.forEach(function (u) {
-        html += (
-          '<div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;">' +
-            '<span>' + escapeHtml(u.username) + (u.username === state.loggedInUser ? '<span style="color:#7A7264;font-size:11px;"> (you)</span>' : '') + '</span>' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;">' +
+          '<span>' + escapeHtml(u.username) + (u.username === state.loggedInUser ? '<span style="color:#7A7264;font-size:11px;"> (you)</span>' : '') +
+            '<span style="display:inline-block;margin-left:6px;font-size:10.5px;font-weight:600;color:' + ((u.role || "admin") === "admin" ? ADMIN.accent : "#7A7264") + ';background:' + ((u.role || "admin") === "admin" ? ADMIN.accentSoft : "#EFE9DA") + ';padding:1px 6px;border-radius:5px;">' + ((u.role || "admin") === "admin" ? "Admin" : "Viewer") + '</span>' +
+          '</span>' +
+          '<div style="display:flex;align-items:center;gap:4px;">' +
+            '<button class="link-btn" data-action="start-edit-password" data-username="' + escapeHtml(u.username) + '" style="border:none;background:transparent;color:#7A7264;font-size:11.5px;cursor:pointer;text-decoration:underline;padding:2px 4px;">Change password</button>' +
             '<button class="del-btn" data-action="remove-user" data-username="' + escapeHtml(u.username) + '" aria-label="Remove ' + escapeHtml(u.username) + '" style="border:none;background:transparent;cursor:pointer;padding:2px;color:#A39C8C;">' +
               icon(ICONS.trash2, 14) +
             '</button>' +
-          '</div>'
-        );
-      });
-      html += '</div>';
-      html += '<div style="font-size:12px;font-weight:600;color:#7A7264;margin-bottom:8px;">Add new user</div>';
-      html += '<div style="margin-bottom:8px;">';
-      html += '<input type="text" placeholder="Username" data-field="username" data-scope="newUser" value="' + escapeHtml(state.newUserForm.username) + '" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid #D8D0BC;font-size:13.5px;background:#FBFAF6;color:#2B2A28;margin-bottom:6px;" />';
-      html += '<input type="password" placeholder="Password" data-field="password" data-scope="newUser" value="' + escapeHtml(state.newUserForm.password) + '" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid #D8D0BC;font-size:13.5px;background:#FBFAF6;color:#2B2A28;margin-bottom:6px;" />';
-      html += '<input type="password" placeholder="Confirm password" data-field="confirm" data-scope="newUser" value="' + escapeHtml(state.newUserForm.confirm) + '" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid #D8D0BC;font-size:13.5px;background:#FBFAF6;color:#2B2A28;" />';
-      html += '</div>';
-      if (state.newUserError) html += '<div style="font-size:12px;color:#8C4A3B;margin-bottom:8px;">' + escapeHtml(state.newUserError) + '</div>';
-      html += '<button data-action="add-user" style="width:100%;padding:9px;border-radius:8px;border:none;background:' + ADMIN.accent + ';color:#FFFFFF;font-size:13.5px;font-weight:600;cursor:pointer;">Add user</button>';
-      html += '</div>';
-
-      // Summary cards
-      html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:18px;">';
-      PANELS.forEach(function (p) {
+          '</div>' +
+        '</div>'
+      );
+      if (isEditing) {
         html += (
-          '<div style="background:#FFFFFF;border:1px solid #E4DDCB;border-left:4px solid ' + p.accent + ';border-radius:8px;padding:10px 12px;">' +
-            '<div style="font-size:11.5px;color:#7A7264;">' + p.label + '</div>' +
-            '<div style="font-size:15px;font-weight:700;color:' + p.accent + ';">' + peso(totals[p.id]) + '</div>' +
-            '<div style="font-size:11px;color:#A39C8C;">' + state.data[p.id].length + ' entries</div>' +
+          '<div style="margin-top:6px;padding:10px;background:#FBFAF6;border:1px solid #E4DDCB;border-radius:8px;">' +
+            '<input type="password" placeholder="New password" data-field="password" data-scope="editPassword" value="' + escapeHtml(state.editPasswordForm.password) + '" style="width:100%;padding:7px 9px;border-radius:7px;border:1px solid #D8D0BC;font-size:13px;background:#FFFFFF;color:#2B2A28;margin-bottom:6px;" />' +
+            '<input type="password" placeholder="Confirm new password" data-field="confirm" data-scope="editPassword" value="' + escapeHtml(state.editPasswordForm.confirm) + '" style="width:100%;padding:7px 9px;border-radius:7px;border:1px solid #D8D0BC;font-size:13px;background:#FFFFFF;color:#2B2A28;" />' +
+            (state.editPasswordError ? '<div style="font-size:11.5px;color:#8C4A3B;margin-top:6px;">' + escapeHtml(state.editPasswordError) + '</div>' : '') +
+            '<div style="display:flex;gap:6px;margin-top:8px;">' +
+              '<button data-action="save-edit-password" style="flex:1;padding:7px;border-radius:7px;border:none;background:' + ADMIN.accent + ';color:#FFFFFF;font-size:12.5px;font-weight:600;cursor:pointer;">Save</button>' +
+              '<button data-action="cancel-edit-password" style="flex:1;padding:7px;border-radius:7px;border:1px solid #D8D0BC;background:#FFFFFF;color:#2B2A28;font-size:12.5px;cursor:pointer;">Cancel</button>' +
+            '</div>' +
+          '</div>'
+        );
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+    html += '<div style="font-size:12px;font-weight:600;color:#7A7264;margin-bottom:8px;">Add new user</div>';
+    html += '<div style="margin-bottom:8px;">';
+    html += '<input type="text" placeholder="Username" data-field="username" data-scope="newUser" value="' + escapeHtml(state.newUserForm.username) + '" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid #D8D0BC;font-size:13.5px;background:#FBFAF6;color:#2B2A28;margin-bottom:6px;" />';
+    html += '<input type="password" placeholder="Password" data-field="password" data-scope="newUser" value="' + escapeHtml(state.newUserForm.password) + '" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid #D8D0BC;font-size:13.5px;background:#FBFAF6;color:#2B2A28;margin-bottom:6px;" />';
+    html += '<input type="password" placeholder="Confirm password" data-field="confirm" data-scope="newUser" value="' + escapeHtml(state.newUserForm.confirm) + '" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid #D8D0BC;font-size:13.5px;background:#FBFAF6;color:#2B2A28;margin-bottom:6px;" />';
+    html += (
+      '<label style="display:block;font-size:12px;color:#7A7264;margin-bottom:4px;">Access level</label>' +
+      '<select data-field="role" data-scope="newUser" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid #D8D0BC;font-size:13.5px;background:#FBFAF6;color:#2B2A28;">' +
+        '<option value="viewer"' + (state.newUserForm.role !== "admin" ? " selected" : "") + '>Viewer \u2014 can view only</option>' +
+        '<option value="admin"' + (state.newUserForm.role === "admin" ? " selected" : "") + '>Admin \u2014 full access</option>' +
+      '</select>'
+    );
+    html += '</div>';
+    if (state.newUserError) html += '<div style="font-size:12px;color:#8C4A3B;margin-bottom:8px;">' + escapeHtml(state.newUserError) + '</div>';
+    html += '<button data-action="add-user" style="width:100%;padding:9px;border-radius:8px;border:none;background:' + ADMIN.accent + ';color:#FFFFFF;font-size:13.5px;font-weight:600;cursor:pointer;">Add user</button>';
+    html += '</div>';
+
+    // Danger zone
+    html += (
+      '<div style="border:1px solid #E2C4BC;background:#FBF0EE;border-radius:10px;padding:12px 14px;">' +
+        '<div style="font-size:13px;font-weight:700;color:#8C4A3B;margin-bottom:4px;">Danger zone</div>' +
+        '<div style="font-size:12.5px;color:#8C4A3B;margin-bottom:10px;">Permanently erase every entry in every category.</div>' +
+        '<button data-action="reset-all" style="display:flex;align-items:center;gap:6px;padding:8px 12px;border-radius:8px;border:1px solid #8C4A3B;background:transparent;color:#8C4A3B;font-size:13px;font-weight:600;cursor:pointer;">' +
+          icon(ICONS.rotateCcw, 14) + ' Reset all data' +
+        '</button>' +
+      '</div>'
+    );
+
+    html += '</div>'; // wrapper
+    return html;
+  }
+
+  function renderHistory(totals) {
+    var html = '<div style="margin-top:14px;">';
+
+    // Summary cards
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:18px;">';
+    PANELS.forEach(function (p) {
+      html += (
+        '<div style="background:#FFFFFF;border:1px solid #E4DDCB;border-left:4px solid ' + p.accent + ';border-radius:8px;padding:10px 12px;">' +
+          '<div style="font-size:11.5px;color:#7A7264;">' + p.label + '</div>' +
+          '<div style="font-size:15px;font-weight:700;color:' + p.accent + ';">' + peso(totals[p.id]) + '</div>' +
+          '<div style="font-size:11px;color:#A39C8C;">' + state.data[p.id].length + ' entries</div>' +
+        '</div>'
+      );
+    });
+    html += '</div>';
+
+    // Overall totals
+    html += (
+      '<div style="background:#2B2A28;color:#F5F1E8;border-radius:10px;padding:12px 14px;display:flex;justify-content:space-between;margin-bottom:20px;">' +
+        '<div><div style="font-size:11px;color:#B9B2A0;">Received</div><div style="font-size:15px;font-weight:600;">' + peso(totals.income) + '</div></div>' +
+        '<div><div style="font-size:11px;color:#B9B2A0;">Spent</div><div style="font-size:15px;font-weight:600;">' + peso(totals.expenses) + '</div></div>' +
+        '<div style="text-align:right;"><div style="font-size:11px;color:#B9B2A0;">Balance</div><div style="font-size:15px;font-weight:600;color:' + (totals.balance < 0 ? "#E2A29A" : "#CFE3C8") + ';">' + peso(totals.balance) + '</div></div>' +
+      '</div>'
+    );
+
+    // Combined log
+    html += '<div style="font-size:14px;font-weight:700;margin-bottom:8px;">All transactions</div>';
+    var allEntries = computeAllEntries();
+    if (allEntries.length === 0) {
+      html += '<div style="font-size:13px;color:#A39C8C;font-style:italic;">No entries recorded yet.</div>';
+    } else {
+      html += '<div style="display:flex;flex-direction:column;gap:8px;">';
+      allEntries.forEach(function (e) {
+        html += (
+          '<div style="background:#FFFFFF;border:1px solid #E4DDCB;border-left:4px solid ' + e._panel.accent + ';border-radius:8px;padding:9px 12px;display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">' +
+            '<div style="flex:1;min-width:0;">' +
+              '<div style="font-size:11px;color:' + e._panel.accent + ';font-weight:700;">' + e._panel.label + ' \u00B7 ' + escapeHtml(e.date) + '</div>' +
+              (e.desc ? '<div style="font-size:13.5px;margin-top:2px;">' + escapeHtml(e.desc) + '</div>' : '') +
+              '<div style="font-size:14px;font-weight:700;margin-top:2px;color:' + e._panel.accent + ';">' + peso(e.amount) + '</div>' +
+            '</div>' +
+            (isAdmin() ?
+              '<button class="del-btn" data-action="remove-entry" data-cat="' + e._panel.id + '" data-id="' + e.id + '" aria-label="Delete entry" style="border:none;background:transparent;cursor:pointer;padding:4px;color:#A39C8C;">' +
+                icon(ICONS.trash2, 16) +
+              '</button>'
+              : '') +
           '</div>'
         );
       });
       html += '</div>';
+    }
 
-      // Overall totals
+    html += '</div>'; // wrapper
+    return html;
+  }
+
+  function renderCashAdvance() {
+    var people = [panelById("edwin"), panelById("bombet")];
+    var html = '<div style="margin-top:14px;">';
+
+    people.forEach(function (person) {
+      var entries = state.data[person.id].filter(function (e) { return e.advance || e.appliedToAdvance; })
+        .slice()
+        .sort(function (a, b) { return (b.date || "").localeCompare(a.date || ""); });
+      var balance = computeCashAdvanceBalance(person.id);
+
+      html += '<div style="margin-bottom:24px;">';
       html += (
-        '<div style="background:#2B2A28;color:#F5F1E8;border-radius:10px;padding:12px 14px;display:flex;justify-content:space-between;margin-bottom:20px;">' +
-          '<div><div style="font-size:11px;color:#B9B2A0;">Received</div><div style="font-size:15px;font-weight:600;">' + peso(totals.income) + '</div></div>' +
-          '<div><div style="font-size:11px;color:#B9B2A0;">Spent</div><div style="font-size:15px;font-weight:600;">' + peso(totals.expenses) + '</div></div>' +
-          '<div style="text-align:right;"><div style="font-size:11px;color:#B9B2A0;">Balance</div><div style="font-size:15px;font-weight:600;color:' + (totals.balance < 0 ? "#E2A29A" : "#CFE3C8") + ';">' + peso(totals.balance) + '</div></div>' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+          '<div style="font-size:15px;font-weight:700;color:' + person.accent + ';">' + person.label + '</div>' +
+          '<div style="font-size:13px;color:#7A7264;">Outstanding: <strong style="color:' + person.accent + ';">' + peso(balance) + '</strong></div>' +
         '</div>'
       );
 
-      // Combined log
-      html += '<div style="font-size:14px;font-weight:700;margin-bottom:8px;">All transactions</div>';
-      var allEntries = computeAllEntries();
-      if (allEntries.length === 0) {
-        html += '<div style="font-size:13px;color:#A39C8C;font-style:italic;margin-bottom:20px;">No entries recorded yet.</div>';
+      if (entries.length === 0) {
+        html += '<div style="font-size:13px;color:#A39C8C;font-style:italic;">No cash advance activity for ' + person.label + ' yet.</div>';
       } else {
-        html += '<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;">';
-        allEntries.forEach(function (e) {
+        html += '<div style="display:flex;flex-direction:column;gap:8px;">';
+        entries.forEach(function (e) {
+          var isGiven = !!e.advance;
           html += (
-            '<div style="background:#FFFFFF;border:1px solid #E4DDCB;border-left:4px solid ' + e._panel.accent + ';border-radius:8px;padding:9px 12px;display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">' +
+            '<div style="background:#FFFFFF;border:1px solid #E4DDCB;border-left:4px solid ' + person.accent + ';border-radius:8px;padding:9px 12px;display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">' +
               '<div style="flex:1;min-width:0;">' +
-                '<div style="font-size:11px;color:' + e._panel.accent + ';font-weight:700;">' + e._panel.label + ' \u00B7 ' + escapeHtml(e.date) + '</div>' +
-                (e.desc ? '<div style="font-size:13.5px;margin-top:2px;">' + escapeHtml(e.desc) + '</div>' : '') +
-                '<div style="font-size:14px;font-weight:700;margin-top:2px;color:' + e._panel.accent + ';">' + peso(e.amount) + '</div>' +
+                '<div style="font-size:11px;color:' + person.accent + ';font-weight:700;">' + escapeHtml(e.date) + '</div>' +
+                '<div style="font-size:13.5px;margin-top:2px;">' + (isGiven ? "Cash advance given" : "Payment applied to advance" + (e.desc ? " \u2014 " + escapeHtml(e.desc) : "")) + '</div>' +
+                '<div style="font-size:14px;font-weight:700;margin-top:2px;color:' + (isGiven ? person.accent : "#5C7A5B") + ';">' + (isGiven ? "+ " : "\u2212 ") + peso(e.amount) + '</div>' +
               '</div>' +
-              '<button class="del-btn" data-action="remove-entry" data-cat="' + e._panel.id + '" data-id="' + e.id + '" aria-label="Delete entry" style="border:none;background:transparent;cursor:pointer;padding:4px;color:#A39C8C;">' +
-                icon(ICONS.trash2, 16) +
-              '</button>' +
+              (isAdmin() ?
+                '<button class="del-btn" data-action="remove-entry" data-cat="' + person.id + '" data-id="' + e.id + '" aria-label="Delete entry" style="border:none;background:transparent;cursor:pointer;padding:4px;color:#A39C8C;">' +
+                  icon(ICONS.trash2, 16) +
+                '</button>'
+                : '') +
             '</div>'
           );
         });
         html += '</div>';
       }
+      html += '</div>';
+    });
 
-      // Danger zone
-      html += (
-        '<div style="border:1px solid #E2C4BC;background:#FBF0EE;border-radius:10px;padding:12px 14px;">' +
-          '<div style="font-size:13px;font-weight:700;color:#8C4A3B;margin-bottom:4px;">Danger zone</div>' +
-          '<div style="font-size:12.5px;color:#8C4A3B;margin-bottom:10px;">Permanently erase every entry in every category.</div>' +
-          '<button data-action="reset-all" style="display:flex;align-items:center;gap:6px;padding:8px 12px;border-radius:8px;border:1px solid #8C4A3B;background:transparent;color:#8C4A3B;font-size:13px;font-weight:600;cursor:pointer;">' +
-            icon(ICONS.rotateCcw, 14) + ' Reset all data' +
-          '</button>' +
-        '</div>'
-      );
-
-      html += '</div>'; // authed wrapper
-    }
-
+    html += '</div>'; // wrapper
     return html;
   }
 
+
   function renderEntryPanel(active, totals) {
+    var isPersonPanel = (active.id === "edwin" || active.id === "bombet");
+    var caBalance = isPersonPanel ? computeCashAdvanceBalance(active.id) : 0;
+    var hideDesc = isPersonPanel && state.form.advance;
+
     var html = "";
     html += (
       '<div style="font-size:13px;color:#2B2A28;margin:10px 0 16px;">' +
@@ -624,46 +896,56 @@
       '</div>'
     );
 
-    // Entry form
-    html += '<div style="background:#FFFFFF;border:1px solid #E4DDCB;border-radius:12px;padding:14px;margin-bottom:18px;">';
-    active.fields.forEach(function (f) {
-      html += '<div style="margin-bottom:10px;">';
-      if (f.type === "checkbox") {
-        html += (
-          '<label style="display:flex;align-items:center;gap:8px;font-size:13.5px;color:#2B2A28;cursor:pointer;">' +
-            '<input type="checkbox" data-field="' + f.key + '" data-scope="entry" ' + (state.form[f.key] ? "checked" : "") + ' ' +
-            'style="width:16px;height:16px;accent-color:' + active.accent + ';" />' +
-            f.label +
-          '</label>'
-        );
-      } else {
-        html += (
-          '<label style="display:block;font-size:12px;color:#7A7264;margin-bottom:4px;">' + f.label + '</label>' +
-          '<input type="' + f.type + '" placeholder="' + escapeHtml(f.placeholder || "") + '" data-field="' + f.key + '" data-scope="entry" ' +
-          'value="' + escapeHtml(state.form[f.key] !== undefined ? state.form[f.key] : "") + '" ' +
-          'style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid #D8D0BC;font-size:14px;background:#FBFAF6;color:#2B2A28;" />'
-        );
-      }
-      html += '</div>';
-    });
-    html += (
-      '<button class="add-btn" data-action="add-entry" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;border-radius:8px;border:none;background:' + active.accent + ';color:#FFFFFF;font-size:14px;font-weight:600;cursor:pointer;margin-top:4px;">' +
-        icon(ICONS.plus, 16) + ' Add entry' +
-      '</button>'
-    );
-    if (state.saveError) {
-      html += '<div style="font-size:12px;color:#8C4A3B;margin-top:8px;">Couldn\'t save just now \u2014 check your connection and try again.</div>';
+    if (isPersonPanel && caBalance > 0) {
+      html += (
+        '<div style="background:' + active.accentSoft + ';border:1px solid ' + active.accent + '33;border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:12.5px;color:' + active.accent + ';">' +
+          'Outstanding cash advance: <strong>' + peso(caBalance) + '</strong> \u2014 the next payment entered here will be deducted from this balance instead of Cash on Hand.' +
+        '</div>'
+      );
     }
-    html += '</div>';
+
+    // Entry form
+    if (isAdmin()) {
+      html += '<div style="background:#FFFFFF;border:1px solid #E4DDCB;border-radius:12px;padding:14px;margin-bottom:18px;">';
+      active.fields.forEach(function (f) {
+        if (isPersonPanel && f.key === "desc" && hideDesc) return;
+        html += '<div style="margin-bottom:10px;">';
+        if (f.type === "checkbox") {
+          html += (
+            '<label style="display:flex;align-items:center;gap:8px;font-size:13.5px;color:#2B2A28;cursor:pointer;">' +
+              '<input type="checkbox" data-field="' + f.key + '" data-scope="entry" data-rerender="true" ' + (state.form[f.key] ? "checked" : "") + ' ' +
+              'style="width:16px;height:16px;accent-color:' + active.accent + ';" />' +
+              f.label +
+            '</label>'
+          );
+        } else {
+          html += (
+            '<label style="display:block;font-size:12px;color:#7A7264;margin-bottom:4px;">' + f.label + '</label>' +
+            '<input type="' + f.type + '" placeholder="' + escapeHtml(f.placeholder || "") + '" data-field="' + f.key + '" data-scope="entry" ' +
+            'value="' + escapeHtml(state.form[f.key] !== undefined ? state.form[f.key] : "") + '" ' +
+            'style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid #D8D0BC;font-size:14px;background:#FBFAF6;color:#2B2A28;" />'
+          );
+        }
+        html += '</div>';
+      });
+      html += (
+        '<button class="add-btn" data-action="add-entry" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;border-radius:8px;border:none;background:' + active.accent + ';color:#FFFFFF;font-size:14px;font-weight:600;cursor:pointer;margin-top:4px;">' +
+          icon(ICONS.plus, 16) + ' Add entry' +
+        '</button>'
+      );
+      html += '</div>';
+    }
 
     // Entries list
+    var listEntries = state.data[active.id];
+
     if (state.loading) {
       html += '<div style="font-size:13px;color:#7A7264;">Loading entries\u2026</div>';
-    } else if (state.data[active.id].length === 0) {
+    } else if (listEntries.length === 0) {
       html += '<div style="font-size:13px;color:#A39C8C;font-style:italic;">No entries yet for ' + active.label + '.</div>';
     } else {
       html += '<div style="display:flex;flex-direction:column;gap:8px;">';
-      state.data[active.id].forEach(function (e) {
+      listEntries.forEach(function (e) {
         html += (
           '<div style="background:#FFFFFF;border:1px solid #E4DDCB;border-left:4px solid ' + active.accent + ';border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">' +
             '<div style="flex:1;min-width:0;">' +
@@ -672,13 +954,16 @@
               (e.period ? '<div style="font-size:13px;margin-top:2px;">Period: ' + escapeHtml(e.period) + '</div>' : '') +
               (e.orNo ? '<div style="font-size:12px;color:#7A7264;">OR No.: ' + escapeHtml(e.orNo) + '</div>' : '') +
               (e.doneBy ? '<div style="font-size:12px;color:#7A7264;">Done by: ' + escapeHtml(e.doneBy) + '</div>' : '') +
-              (e.advance ? '<span style="display:inline-block;margin-top:4px;font-size:11px;font-weight:600;color:' + active.accent + ';background:' + active.accentSoft + ';padding:2px 7px;border-radius:5px;">Cash advance</span>' : '') +
+              (e.advance ? '<span style="display:inline-block;margin-top:4px;font-size:11px;font-weight:600;color:' + active.accent + ';background:' + active.accentSoft + ';padding:2px 7px;border-radius:5px;">Cash advance given</span>' : '') +
+              (e.appliedToAdvance ? '<span style="display:inline-block;margin-top:4px;font-size:11px;font-weight:600;color:' + active.accent + ';background:' + active.accentSoft + ';padding:2px 7px;border-radius:5px;">Applied to cash advance</span>' : '') +
               (e.txnRef ? '<div style="font-size:12px;color:#7A7264;">Txn Ref. No.: ' + escapeHtml(e.txnRef) + '</div>' : '') +
               '<div style="font-size:15px;font-weight:700;margin-top:4px;color:' + active.accent + ';">' + peso(e.amount) + '</div>' +
             '</div>' +
-            '<button class="del-btn" data-action="remove-entry" data-cat="' + active.id + '" data-id="' + e.id + '" aria-label="Delete entry" style="border:none;background:transparent;cursor:pointer;padding:4px;color:#A39C8C;">' +
-              icon(ICONS.trash2, 16) +
-            '</button>' +
+            (isAdmin() ?
+              '<button class="del-btn" data-action="remove-entry" data-cat="' + active.id + '" data-id="' + e.id + '" aria-label="Delete entry" style="border:none;background:transparent;cursor:pointer;padding:4px;color:#A39C8C;">' +
+                icon(ICONS.trash2, 16) +
+              '</button>'
+              : '') +
           '</div>'
         );
       });
@@ -694,6 +979,7 @@
   function scopeObj(scope) {
     if (scope === "auth") return state.authForm;
     if (scope === "newUser") return state.newUserForm;
+    if (scope === "editPassword") return state.editPasswordForm;
     return state.form;
   }
 
@@ -712,6 +998,13 @@
       if (input.type === "checkbox") {
         input.addEventListener("change", function () {
           obj[field] = input.checked;
+          if (input.getAttribute("data-rerender") === "true") {
+            render();
+          }
+        });
+      } else if (input.tagName === "SELECT") {
+        input.addEventListener("change", function () {
+          obj[field] = input.value;
         });
       } else {
         input.addEventListener("input", function () {
@@ -730,9 +1023,21 @@
     bindAction("add-entry", addEntry);
     bindAction("save-credentials", saveCredentials);
     bindAction("login", login);
-    bindAction("logout", function () { state.authed = false; render(); });
+    bindAction("logout", function () {
+      state.authed = false;
+      state.loggedInUser = "";
+      state.loggedInRole = "admin";
+      state.activeId = "edwin";
+      render();
+    });
     bindAction("add-user", addUser);
     bindAction("reset-all", resetAll);
+    bindAction("save-edit-password", saveEditPassword);
+    bindAction("cancel-edit-password", cancelEditPassword);
+
+    root.querySelectorAll('[data-action="start-edit-password"]').forEach(function (btn) {
+      btn.addEventListener("click", function () { startEditPassword(btn.getAttribute("data-username")); });
+    });
 
     root.querySelectorAll('[data-action="remove-user"]').forEach(function (btn) {
       btn.addEventListener("click", function () { removeUser(btn.getAttribute("data-username")); });
@@ -754,6 +1059,12 @@
   /* ---------------------------------------------------------------- */
   render();
   loadData();
+
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("sw.js").catch(function () {
+      /* ignore registration failures — app still works without it */
+    });
+  }
 })();
 </script>
 </body>
